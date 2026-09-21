@@ -124,9 +124,9 @@ const STATUS = {
   archived: { label: 'Archived',                      cls: 's-archived' }
 };
 const LIMITS = { director: 3, returned: 1, person: 7, desk: 2 };
-const TYPES = ['Invoice', 'Contract', 'Letter', 'Claim', 'Quotation', 'HR', 'Legal', 'Memo', 'Report', 'Other'];
-const PURPOSES = ['Signature', 'Approval', 'Review', 'Information'];
-const OUTCOMES = ['Signed', 'Approved', 'Rejected', 'Needs changes', 'No action'];
+const TYPES = ['Official letter', 'Government letter', 'Circular', 'Notice', 'Approval / permit', 'Agreement', 'Memo', 'Minutes', 'Report', 'Other'];
+const PURPOSES = ['Signature', 'Approval', 'Review', 'Acknowledgement', 'Information'];
+const OUTCOMES = ['Signed', 'Approved', 'Noted', 'Rejected', 'Needs changes', 'No action'];
 
 let state = load();
 let view = 'dash';
@@ -198,7 +198,7 @@ function registerDoc(f) {
   const doc = {
     id: 'd' + Date.now() + Math.random().toString(36).slice(2, 6),
     ref: 'DOC-' + year + '-' + String(state.seq).padStart(4, '0'),
-    title: f.title.trim(), type: f.type, from: f.from.trim(), received: f.received || today(),
+    title: f.title.trim(), type: f.type, from: f.from.trim(), theirRef: (f.theirRef || '').trim(), received: f.received || today(),
     note: (f.note || '').trim(), status: 'desk', where: 'Front desk', since: Date.now(), history: []
   };
   log(doc, 'Received from ' + (doc.from || 'unknown'), f.by, doc.note);
@@ -259,22 +259,23 @@ const views = {
     if (filter.status === 'active') list = list.filter(d => d.status !== 'archived');
     else if (filter.status !== 'all') list = list.filter(d => d.status === filter.status);
     if (filter.type) list = list.filter(d => d.type === filter.type);
-    if (s) list = list.filter(d => [d.ref, d.title, d.from, d.where, d.type, d.note].join(' ').toLowerCase().includes(s));
+    if (s) list = list.filter(d => [d.ref, d.title, d.from, d.theirRef, d.where, d.type, d.note].join(' ').toLowerCase().includes(s));
     return '<h2>Register</h2><div class="card">' +
       '<div class="filters"><select data-act="fstatus"><option value="active"' + (filter.status === 'active' ? ' selected' : '') + '>All active</option><option value="all"' + (filter.status === 'all' ? ' selected' : '') + '>Everything incl. archived</option>' +
       Object.keys(STATUS).map(k => '<option value="' + k + '"' + (filter.status === k ? ' selected' : '') + '>' + STATUS[k].label + '</option>').join('') + '</select>' +
       '<select data-act="ftype"><option value="">All types</option>' + options(TYPES, filter.type) + '</select>' +
       '<button data-act="print">Print list</button><span class="meta" style="align-self:center">' + list.length + ' document' + (list.length === 1 ? '' : 's') + '</span></div>' +
-      (list.length ? '<div class="tablewrap"><table><thead><tr><th>Ref</th><th>Document</th><th>Type</th><th>From</th><th>Received</th><th>Status</th><th>Where now</th><th>Since</th></tr></thead><tbody>' +
-        list.map(d => '<tr><td class="ref">' + esc(d.ref) + '</td><td><span class="title" data-act="open" data-id="' + d.id + '">' + esc(d.title) + '</span></td><td>' + esc(d.type) + '</td><td>' + esc(d.from) + '</td><td>' + esc(d.received) + '</td><td>' + tag(d) + '</td><td>' + esc(d.where) + '</td><td' + (late(d) ? ' class="late"' : '') + '>' + ago(d.since) + '</td></tr>').join('') +
+      (list.length ? '<div class="tablewrap"><table><thead><tr><th>Ref</th><th>Document</th><th>Type</th><th>From</th><th>Their ref.</th><th>Received</th><th>Status</th><th>Where now</th><th>Since</th></tr></thead><tbody>' +
+        list.map(d => '<tr><td class="ref">' + esc(d.ref) + '</td><td><span class="title" data-act="open" data-id="' + d.id + '">' + esc(d.title) + '</span></td><td>' + esc(d.type) + '</td><td>' + esc(d.from) + '</td><td class="ref">' + esc(d.theirRef) + '</td><td>' + esc(d.received) + '</td><td>' + tag(d) + '</td><td>' + esc(d.where) + '</td><td' + (late(d) ? ' class="late"' : '') + '>' + ago(d.since) + '</td></tr>').join('') +
         '</tbody></table></div>' : '<div class="empty">No documents match.</div>') + '</div>';
   },
 
   new() {
     return '<h2>New document</h2><div class="card"><form data-form="new">' +
-      '<div class="grid2"><div><label>Document title *</label><input name="title" required placeholder="e.g. Invoice INV-2291 from Syarikat ABC"></div>' +
+      '<div class="grid2"><div><label>Document title *</label><input name="title" required placeholder="e.g. Letter from MBPJ re: signboard licence"></div>' +
       '<div><label>Type</label><select name="type">' + options(TYPES) + '</select></div>' +
-      '<div><label>From (sender)</label><input name="from" placeholder="Company or person"></div>' +
+      '<div><label>From (agency, department or person)</label><input name="from" placeholder="e.g. Majlis Bandaraya, LHDN, HQ"></div>' +
+      '<div><label>Their reference no.</label><input name="theirRef" placeholder="e.g. MBPJ/JPB/2026/1234"></div>' +
       '<div><label>Date received</label><input name="received" type="date" value="' + today() + '"></div>' +
       '<div><label>Received by</label><input name="by" list="people" placeholder="Your name"></div></div>' +
       '<label>Note</label><textarea name="note" placeholder="Anything useful: urgency, what needs to happen, attachments"></textarea>' +
@@ -318,7 +319,7 @@ function openDetail(id) {
   acts += btn('note', 'Add note') + btn('edit', 'Edit details') + (d.status === 'archived' ? btn('desk', 'Reopen') : btn('archive', 'Archive'));
   const files = d.files || [];
   modal('<span><span class="ref">' + esc(d.ref) + '</span> ' + esc(d.title) + '</span>',
-    '<div class="meta">' + esc(d.type) + (d.from ? ' · from ' + esc(d.from) : '') + ' · received ' + esc(d.received) + '</div>' +
+    '<div class="meta">' + esc(d.type) + (d.from ? ' · from ' + esc(d.from) : '') + (d.theirRef ? ' · their ref ' + esc(d.theirRef) : '') + ' · received ' + esc(d.received) + '</div>' +
     (d.note ? '<p>' + esc(d.note) + '</p>' : '') +
     '<div class="status-big">' + tag(d) + '<b>' + esc(d.where) + '</b><span class="meta">since ' + fmt(d.since) + ' (' + (late(d) ? '<span class="late">' : '<span>') + ago(d.since) + '</span>)</span></div>' +
     '<div class="actions">' + acts + '</div>' +
@@ -361,6 +362,7 @@ function actionForm(kind, id) {
       '<label>Title *</label><input name="title" required value="' + esc(d.title) + '">' +
       '<label>Type</label><select name="type">' + options(TYPES, d.type) + '</select>' +
       '<label>From</label><input name="from" value="' + esc(d.from) + '">' +
+      '<label>Their reference no.</label><input name="theirRef" value="' + esc(d.theirRef) + '">' +
       '<label>Date received</label><input name="received" type="date" value="' + esc(d.received) + '">' +
       '<label>Note</label><textarea name="note">' + esc(d.note) + '</textarea>']
   };
@@ -381,7 +383,7 @@ function runAction(kind, id, f) {
   else if (kind === 'desk') { const was = d.status; move(d, 'desk', 'Front desk'); log(d, was === 'archived' ? 'Reopened' : 'Back at front desk', f.by, f.note); }
   else if (kind === 'archive') { move(d, 'archived', d.where); log(d, 'Archived', f.by, f.note); }
   else if (kind === 'note') log(d, 'Note', f.by, f.note);
-  else if (kind === 'edit') { d.title = f.title.trim(); d.type = f.type; d.from = f.from.trim(); d.received = f.received; d.note = f.note.trim(); }
+  else if (kind === 'edit') { d.title = f.title.trim(); d.type = f.type; d.from = f.from.trim(); d.theirRef = (f.theirRef || '').trim(); d.received = f.received; d.note = f.note.trim(); }
   save();
   toast('Saved: ' + d.ref);
   render();
@@ -447,15 +449,15 @@ function importJson(file) {
 }
 function loadSample() {
   const shift = (doc, d) => { doc.since -= d * DAY; doc.history.forEach(h => h.ts -= d * DAY); };
-  let a = registerDoc({ title: 'Invoice INV-2291 Syarikat ABC', type: 'Invoice', from: 'Syarikat ABC Sdn Bhd', received: today(), by: 'Aina', note: 'Due 30 days', direct: true, purpose: 'Approval' });
+  let a = registerDoc({ title: 'Signboard licence renewal, MBPJ', type: 'Government letter', from: 'Majlis Bandaraya Petaling Jaya', theirRef: 'MBPJ/JPB/2026/1234', received: today(), by: 'Aina', note: 'Reply due in 14 days', direct: true, purpose: 'Approval' });
   shift(a, 5);
-  let b = registerDoc({ title: 'Staff confirmation letter, Hafiz', type: 'HR', from: 'HR', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Signature' });
+  let b = registerDoc({ title: 'Audit notice 2025 accounts', type: 'Notice', from: 'LHDN Cawangan PJ', theirRef: 'LHDN/PJ/AUD/77812', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Signature' });
   shift(b, 1);
-  let c = registerDoc({ title: 'Tenancy agreement renewal', type: 'Contract', from: 'Landlord', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Signature' });
+  let c = registerDoc({ title: 'Tenancy agreement renewal', type: 'Agreement', from: 'Landlord', theirRef: '', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Signature' });
   log(c, 'Returned from Director: Signed', 'Aina', ''); applyNext(c, 'desk', '', 'Aina', ''); shift(c, 2);
-  let e = registerDoc({ title: 'Quotation Q-118 to Klinik Sinar', type: 'Quotation', from: 'Sales', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Approval' });
-  log(e, 'Returned from Director: Approved', 'Aina', ''); applyNext(e, 'file', 'Cabinet A / Drawer 1 / Quotations 2026', 'Aina', ''); shift(e, 3);
-  let g = registerDoc({ title: 'Medical claim, Siti', type: 'Claim', from: 'Siti', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Approval' });
+  let e = registerDoc({ title: 'HQ circular: new leave policy', type: 'Circular', from: 'HQ Admin', theirRef: 'HQ/ADM/CIR/09/2026', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Approval' });
+  log(e, 'Returned from Director: Approved', 'Aina', ''); applyNext(e, 'file', 'Cabinet A / Drawer 1 / Circulars 2026', 'Aina', ''); shift(e, 3);
+  let g = registerDoc({ title: 'Bank letter: facility review', type: 'Official letter', from: 'Maybank Business', theirRef: 'MBB/BIZ/2026/5561', received: today(), by: 'Aina', note: '', direct: true, purpose: 'Approval' });
   log(g, 'Returned from Director: Approved', 'Aina', ''); applyNext(g, 'person', 'Farah (Accounts)', 'Aina', 'process payment'); shift(g, 9);
   save();
   toast('Sample data loaded');

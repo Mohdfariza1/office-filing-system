@@ -1,11 +1,11 @@
 # Office Filing System
 
-A simple tracker for paper documents in the office. It answers one question: **where is the document now?**
+A simple tracker for official paper documents in the office (letters from agencies, government notices, circulars, approvals, agreements). It answers one question: **where is the document now?**
 
 The usual failure: a document goes into the Director's office, comes out signed, and nobody knows where it went next. This app makes "came back from Director" a step that cannot be saved without naming the destination (a filing location, a staff member, or an outside party).
 
 ## How it works
-- **New document**: register it when it lands on the desk. Tick "Going straight to the Director" if that is where it goes first.
+- **New document**: register it when it lands on the desk, with the sender and their reference number so it can be found again by either. Tick "Going straight to the Director" if that is where it goes first.
 - **Dashboard**: what is with the Director, what is back on the desk with no home, what is overdue.
 - **Came back**: record the outcome and, in the same step, where it goes now.
 - **Register**: full list, search by ref, title, sender or location. Click a row for the full history.
