@@ -137,9 +137,9 @@ let armed = null;
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(KEY));
-    if (s && Array.isArray(s.docs)) return s;
+    if (s && Array.isArray(s.docs)) { s.drive = s.drive || { url: '', key: '' }; return s; }
   } catch (e) {}
-  return { docs: [], people: [], locations: [], seq: 0 };
+  return { docs: [], people: [], locations: [], seq: 0, drive: { url: '', key: '' } };
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -291,6 +291,10 @@ const views = {
       '<form data-form="add-loc" class="actions" style="margin-top:12px"><input name="name" placeholder="e.g. Cabinet A / Drawer 2 / Invoices 2026" style="flex:1;min-width:200px" required><button type="submit">Add</button></form></div>' +
       '<div class="card"><h3>Staff</h3><ul class="list">' + li(state.people, 'del-person') + '</ul>' +
       '<form data-form="add-person" class="actions" style="margin-top:12px"><input name="name" placeholder="Name" style="flex:1;min-width:200px" required><button type="submit">Add</button></form></div>' +
+      '<div class="card"><h3>Google Drive scans</h3><p class="help">Scans upload through a Google Apps Script in your own Google account and land in a Drive folder called "Office Filing System". Setup steps are in the README.</p>' +
+      '<form data-form="drive"><label>Script web app URL</label><input name="url" type="url" value="' + esc(state.drive.url) + '" placeholder="https://script.google.com/macros/s/…/exec">' +
+      '<label>Secret key (must match the one in the script)</label><input name="key" value="' + esc(state.drive.key) + '">' +
+      '<div class="actions" style="margin-top:12px"><button class="primary" type="submit">Save</button><button type="button" data-act="drive-test"' + (state.drive.url ? '' : ' disabled') + '>Test connection</button></div></form></div>' +
       '<div class="card"><h3>Backup</h3><p class="help">Data lives in this browser on this PC only. Download a backup regularly and keep it somewhere safe.</p>' +
       '<div class="actions"><button data-act="export">Download backup (JSON)</button><label class="btn" style="margin:0">Restore from backup<input type="file" accept="application/json" data-act="import" style="display:none"></label></div></div>' +
       '<div class="card"><h3>Danger zone</h3><div class="actions">' +
@@ -312,11 +316,15 @@ function openDetail(id) {
   if (d.status === 'director') acts = btn('fromdir', 'Came back from Director', 'primary');
   else if (d.status !== 'archived') acts = btn('todir', 'Send to Director', d.status === 'desk' || d.status === 'returned' ? 'primary' : '') + btn('file', 'File it') + btn('hand', 'Hand to staff') + btn('out', 'Send out') + (d.status !== 'desk' && d.status !== 'returned' ? btn('desk', 'Back to desk') : '');
   acts += btn('note', 'Add note') + btn('edit', 'Edit details') + (d.status === 'archived' ? btn('desk', 'Reopen') : btn('archive', 'Archive'));
+  const files = d.files || [];
   modal('<span><span class="ref">' + esc(d.ref) + '</span> ' + esc(d.title) + '</span>',
     '<div class="meta">' + esc(d.type) + (d.from ? ' · from ' + esc(d.from) : '') + ' · received ' + esc(d.received) + '</div>' +
     (d.note ? '<p>' + esc(d.note) + '</p>' : '') +
     '<div class="status-big">' + tag(d) + '<b>' + esc(d.where) + '</b><span class="meta">since ' + fmt(d.since) + ' (' + (late(d) ? '<span class="late">' : '<span>') + ago(d.since) + '</span>)</span></div>' +
     '<div class="actions">' + acts + '</div>' +
+    '<h3 style="margin-top:20px">Scanned copies</h3>' +
+    (files.length ? '<ul class="list">' + files.map(f => '<li><a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.name) + '</a><span class="meta">' + fmt(f.ts) + (f.by ? ' · ' + esc(f.by) : '') + '</span></li>').join('') + '</ul>' : '<div class="meta">None attached.</div>') +
+    '<div class="actions" style="margin-top:8px">' + btn('attach', 'Attach scan') + '</div>' +
     '<h3 style="margin-top:20px">History</h3><ul class="hist">' + d.history.slice().reverse().map(h =>
       '<li>' + esc(h.action) + (h.note ? ' — ' + esc(h.note) : '') + '<small>' + fmt(h.ts) + (h.by ? ' · ' + esc(h.by) : '') + '</small></li>').join('') + '</ul>');
 }
@@ -345,6 +353,10 @@ function actionForm(kind, id) {
     desk: ['Back to front desk', by + note],
     archive: ['Archive', '<p class="help">Use this when the document is closed and no longer moves. It stays searchable in the register.</p>' + by + note],
     note: ['Add note', '<label>Note *</label><textarea name="note" required></textarea>' + by],
+    attach: ['Attach scan',
+      (state.drive.url ? '<label>Upload a scan to Google Drive (PDF or image, up to 20 MB)</label><input name="file" type="file" accept="application/pdf,image/*">' : '<p class="help">Google Drive upload is not set up yet. Add the script URL in Settings, or paste a Drive link below.</p>') +
+      '<label>Or paste a Google Drive link</label><input name="link" type="url" placeholder="https://drive.google.com/file/d/…">' +
+      '<label>Name (optional)</label><input name="name" placeholder="e.g. signed copy">' + by],
     edit: ['Edit details',
       '<label>Title *</label><input name="title" required value="' + esc(d.title) + '">' +
       '<label>Type</label><select name="type">' + options(TYPES, d.type) + '</select>' +
@@ -376,6 +388,41 @@ function runAction(kind, id, f) {
   openDetail(id);
 }
 
+function drivePost(body) {
+  return fetch(state.drive.url, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(Object.assign({ key: state.drive.key }, body)) })
+    .then(r => r.json());
+}
+function addFile(d, f) {
+  d.files = d.files || [];
+  d.files.push(f);
+  log(d, 'Scan attached: ' + f.name, f.by, '');
+  save();
+  toast('Attached to ' + d.ref);
+  render();
+  openDetail(d.id);
+}
+function attachScan(id, form, f) {
+  const d = byId(id);
+  if (!d) return;
+  const file = form.querySelector('[name=file]') && form.querySelector('[name=file]').files[0];
+  const link = (f.link || '').trim();
+  if (!file && !link) { toast('Choose a file or paste a link.'); return; }
+  if (!file) { addFile(d, { name: (f.name || '').trim() || 'Drive link', url: link, ts: Date.now(), by: (f.by || '').trim() }); return; }
+  if (file.size > 20 * 1024 * 1024) { toast('File is over 20 MB.'); return; }
+  const btn = form.querySelector('button[type=submit]');
+  btn.disabled = true;
+  btn.textContent = 'Uploading…';
+  const r = new FileReader();
+  r.onload = () => {
+    drivePost({ action: 'upload', ref: d.ref, title: d.title, name: file.name, mime: file.type, data: r.result.split(',')[1] })
+      .then(res => {
+        if (!res.ok) throw new Error(res.error || 'upload failed');
+        addFile(d, { name: (f.name || '').trim() || res.name, url: res.url, id: res.id, ts: Date.now(), by: (f.by || '').trim() });
+      })
+      .catch(err => { toast('Upload failed: ' + err.message); btn.disabled = false; btn.textContent = 'Save'; });
+  };
+  r.readAsDataURL(file);
+}
 function exportJson() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -390,7 +437,7 @@ function importJson(file) {
     try {
       const s = JSON.parse(r.result);
       if (!s || !Array.isArray(s.docs)) throw new Error('bad');
-      state = { docs: s.docs, people: s.people || [], locations: s.locations || [], seq: s.seq || s.docs.length };
+      state = { docs: s.docs, people: s.people || [], locations: s.locations || [], seq: s.seq || s.docs.length, drive: s.drive || state.drive };
       save();
       toast('Backup restored: ' + state.docs.length + ' documents');
       render();
@@ -432,14 +479,18 @@ document.body.addEventListener('click', e => {
   else if (act === 'filter') { filter.status = el.dataset.status; view = 'register'; render(); }
   else if (act === 'open') { closeModal(); openDetail(id); }
   else if (act === 'close') closeModal();
-  else if (['todir', 'fromdir', 'file', 'hand', 'out', 'desk', 'archive', 'note', 'edit'].includes(act)) actionForm(act, id);
+  else if (['todir', 'fromdir', 'file', 'hand', 'out', 'desk', 'archive', 'note', 'edit', 'attach'].includes(act)) actionForm(act, id);
   else if (act === 'print') window.print();
+  else if (act === 'drive-test') {
+    toast('Testing…');
+    drivePost({ action: 'ping' }).then(r => toast(r.ok ? 'Google Drive connected.' : 'Script answered but rejected: ' + (r.error || 'check the secret key'))).catch(e => toast('Cannot reach the script: ' + e.message));
+  }
   else if (act === 'export') exportJson();
   else if (act === 'sample') loadSample();
   else if (act === 'del-loc') { state.locations = state.locations.filter(x => x !== el.dataset.name); save(); render(); }
   else if (act === 'del-person') { state.people = state.people.filter(x => x !== el.dataset.name); save(); render(); }
   else if (act === 'wipe') {
-    if (armed === 'wipe') { state = { docs: [], people: [], locations: [], seq: 0 }; save(); armed = null; toast('All data deleted'); }
+    if (armed === 'wipe') { state = { docs: [], people: [], locations: [], seq: 0, drive: state.drive }; save(); armed = null; toast('All data deleted'); }
     else armed = 'wipe';
     render();
   }
@@ -475,8 +526,10 @@ document.body.addEventListener('submit', e => {
     render();
     openDetail(d.id);
   } else if (kind === 'action') {
-    runAction(form.dataset.kind, form.dataset.id, f);
-  } else if (kind === 'add-loc') { remember(state.locations, f.name); save(); render(); }
+    if (form.dataset.kind === 'attach') attachScan(form.dataset.id, form, f);
+    else runAction(form.dataset.kind, form.dataset.id, f);
+  } else if (kind === 'drive') { state.drive = { url: f.url.trim(), key: f.key.trim() }; save(); toast('Drive settings saved'); render(); }
+  else if (kind === 'add-loc') { remember(state.locations, f.name); save(); render(); }
   else if (kind === 'add-person') { remember(state.people, f.name); save(); render(); }
 });
 
